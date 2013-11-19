@@ -9,10 +9,12 @@ object  Main {
 
 	def main(args: Array[String]) {
 		println(welcome)
+		println("-" * welcome.length)
 		val p = new Prolog()		
 
 		p.consult("initial.pl")
 		print(prompt)
+
 		for ( line <- io.Source.stdin.getLines ) {
 			try {
 					line match {
@@ -23,27 +25,30 @@ object  Main {
 			} catch { case e: Exception => println(e) }
 			print(prompt)
 		}
-    }
+	}
 }
 
 class Prolog {
 
 	val database = scala.collection.mutable.MutableList[Term]()
 
-    def assert(fact: Term) { database += fact }
+	def assert(fact: Term) { database += fact }
 
-    def consult(filename: String) {
-    	println("Loading " + filename)
-    	try {
-	    	for (line <- scala.io.Source.fromFile(filename).mkString.split("\\.")) {
-	    		assert(PrologParser.parse(line.trim))
-	    	}
-	    } catch { case e: Exception => println(e) }
-    }
+	def consult(filename: String) {
+		println("Loading " + filename)
+		try {
+			for (line <- scala.io.Source.fromFile(filename)
+					.getLines()
+					.filter(!_.isEmpty())
+					.filter(!_.startsWith("%"))) {
+				assert(PrologParser.parse(line.trim))
+			}
+		} catch { case e: Exception => println(e) }
+	}
 
-    def solve(goalList: Seq[Term], env: Env, level: Int): Unit = env match {
-    	case env: Fail => env // Fail fast
-    	case env: Success => goalList match {
+	def solve(goalList: Seq[Term], env: Env, level: Int): Unit = env match {
+		case env: Fail => env // Fail fast
+		case env: Success => goalList match {
 			// We have a solution!
 			case Nil => {
 				env.print()
@@ -131,15 +136,16 @@ case class Variable(name: String, level: Int = 0) extends Term with Ordered[Vari
 
 // PARSER
 object PrologParser extends JavaTokenParsers {
-	def atom: 		Parser[Atom] 		= """[a-z]\w*""".r ^^ { Atom(_) }
-	def number:		Parser[Number] 		= """\d+(.\d+)?""".r ^^ { case v => Number(v.toDouble) }
-	def variable:	Parser[Variable] 	= """[A-Z]\w*""".r ^^ { case name => Variable(name) }
-	def predicate: 	Parser[Predicate] 	= """[a-z]\w*""".r ~ ("(" ~> repsep(term, ",") <~ ")") ^^ {
+	def atom: 		Parser[Atom]		= """[a-z]\w*""".r ^^ { Atom(_) }
+	def number:		Parser[Number]		= """\d+(.\d+)?""".r ^^ { case v => Number(v.toDouble) }
+	def variable:	Parser[Variable]	= """[A-Z]\w*""".r ^^ { case name => Variable(name) }
+	def predicate: 	Parser[Predicate]	= """[a-z]\w*""".r ~ ("(" ~> repsep(term, ",") <~ ")") ^^ {
 		case head ~ args => Predicate(head, args.length, List() ++ args)
 	}
-	def term: 		Parser[Term] 		= predicate | number | atom | variable
+	def term:		Parser[Term]		= predicate | number | atom | variable
+	def sentence:	Parser[Term] 		= term <~ "."
 
-	def parse(s: String): Term = parseAll(term, s) match {
+	def parse(s: String): Term = parseAll(sentence, s) match {
 			case Success(result, _) => result
 			case failure : NoSuccess => scala.sys.error(failure.msg) // throws a runtime exception!
 		}
