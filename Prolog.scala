@@ -3,27 +3,32 @@ import scala.collection.immutable._
 
 // An experiment with writing a Prolog interpreter in Scala
 
-object Prolog {
-
-	val database = scala.collection.mutable.MutableList[Term]()
+object  Main {
 	val prompt = "\n? "
 	val welcome = "Simple Prolog Interpreter in Scala"
 
-    def main(args: Array[String]) {
+	def main(args: Array[String]) {
 		println(welcome)
-		consult("initial.pl")
+		val p = new Prolog()		
+
+		p.consult("initial.pl")
 		print(prompt)
 		for ( line <- io.Source.stdin.getLines ) {
 			try {
 					line match {
 						case "\\q" 	=> System.exit(0)
-						case "\\l" 	=> println(database.mkString("\n"))
-						case _ 		=> solve(List(PrologParser.parse(line)), Success(), 1)
+						case "\\l" 	=> println(p.database.mkString("\n"))
+						case _ 		=> p.solve(List(PrologParser.parse(line)), Success(), 1)
 					}
 			} catch { case e: Exception => println(e) }
 			print(prompt)
 		}
     }
+}
+
+class Prolog {
+
+	val database = scala.collection.mutable.MutableList[Term]()
 
     def assert(fact: Term) { database += fact }
 
