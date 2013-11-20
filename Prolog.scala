@@ -36,14 +36,23 @@ class Prolog {
 
 	def consult(filename: String) {
 		println("Loading " + filename)
+		var lineNumber = -1;
 		try {
-			for (line <- scala.io.Source.fromFile(filename)
-					.getLines()
-					.filter(!_.isEmpty())
-					.filter(!_.startsWith("%"))) {
+			for ((line, index) <- scala.io.Source.fromFile(filename)
+					.getLines.zipWithIndex
+					.filter(!_._1.isEmpty)
+					.filter(!_._1.startsWith("%"))) 
+			{
+				// Save the line number in case of error
+				lineNumber = index
 				assert(PrologParser.parse(line.trim))
 			}
-		} catch { case e: Exception => println(e) }
+		} 
+		catch { 
+			case e: Exception => {
+				println("Syntax error in line " + lineNumber + ": " + e.getMessage)
+			}
+		}
 	}
 
 	def solve(goalList: Seq[Term], env: Env, level: Int): Unit = env match {
