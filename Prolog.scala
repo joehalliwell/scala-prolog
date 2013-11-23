@@ -113,7 +113,7 @@ case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) exten
 				case (t1: Atom, t2: Atom) if (t1 == t2) => this
 				case (t1, t2: Variable) => bind(t2, t2, t1)
 				case (t1: Variable, t2) => bind(t1, t1, t2)
-				case (t1: Predicate, t2: Predicate) if (t1.name == t2.name && t1.adicity == t2.adicity) 
+				case (t1: Predicate, t2: Predicate) if (t1.name == t2.name && t1.arity == t2.arity) 
 					// This is neat, but inefficient! Is there a nice way to write it?
 					=> t1.args.zip(t2.args).foldLeft(this: Env)((x,y) => x.unify(y))
 				case _ => Fail()
@@ -140,9 +140,9 @@ case class Number(value: Double) extends Term {
 case class Str(value: String) extends Term {
 	override def toString = value
 }
-case class Predicate(name: String, adicity: Int, args: Seq[Term]) extends Term {
+case class Predicate(name: String, arity: Int, args: Seq[Term]) extends Term {
 	override def toString = name + "(" + args.mkString(",") + ")"
-	override def renameVars(level: Int) = Predicate(name, adicity, args.map(_.renameVars(level)))
+	override def renameVars(level: Int) = Predicate(name, arity, args.map(_.renameVars(level)))
 }
 case class Variable(name: String, level: Int = 0) extends Term with Ordered[Variable] {
 	override def toString = name //+ "_" + level
@@ -152,24 +152,36 @@ case class Variable(name: String, level: Int = 0) extends Term with Ordered[Vari
 		case v => v
 	}
 }
+object EmptyList extends Atom("[]")
 
 // PARSER
 object PrologParser extends JavaTokenParsers {
 	def atom: 		Parser[Atom]		= """[a-z]\w*""".r ^^ { Atom(_) }
 	def number:		Parser[Number]		= decimalNumber ^^ { case v => Number(v.toDouble) }
-	def str:		Parser[Str]			= "\"" ~> """([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*""".r <~"\"" ^^ {
+	def str:			Parser[Str]			= "\"" ~> """([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*""".r <~"\"" ^^ {
 		// TODO: Other escape codes
 		case v => Str(v.replaceAll("\\\\n","\n"))
 	}
-	def variable:	Parser[Variable]	= """[A-Z]\w*""".r ^^ { case name => Variable(name) }
+	def variable:		Parser[Variable]	= """[A-Z]\w*""".r ^^ { case name => Variable(name) }
 	def predicate: 	Parser[Predicate]	= """[a-z]\w*""".r ~ ("(" ~> repsep(term, ",") <~ ")") ^^ {
 		case head ~ args => Predicate(head, args.length, List() ++ args)
 	}
-	def term:		Parser[Term]		= predicate | number | str | atom | variable
+	def list:				Parser[Term] = "[" ~> listbody <~ "]"
+	def listbody: 	Parser[Term] = repsep(term, ",") ~ opt("|" ~> (variable | list)) ^^ {
+		case headList ~ Some(tail)			=> list(headList, tail)
+		case headList ~ None						=> list(headList, EmptyList)
+	}
+	def term:		Parser[Term]		= predicate | number | str | atom | variable | list
 	def sentence:	Parser[Term] 		= term <~ "."
 
 	def parse(s: String): Term = parseAll(sentence, s) match {
 			case Success(result, _) => result
-			case failure : NoSuccess => scala.sys.error(failure.msg) // throws a runtime exception!
-		}
+			case failure : NoSuccess => scala.sys.error(failure.msg) // throws a runtime exception!	
+	}
+
+	// Helper function to make lists
+	def list(args: Seq[Term], tail: Term): Term = args match {
+		case Nil => tail
+		case default => Predicate(",",2, Seq(args.head, list(args.tail, tail)))
+	}
 }
