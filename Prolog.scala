@@ -1,9 +1,10 @@
 import scala.util.parsing.combinator._
 import scala.collection.immutable._
+import scala.tools.jline.console._
 
 // An experiment with writing a Prolog interpreter in Scala
 
-object  Main {
+object Main {
 	val prompt = "\n? "
 	val welcome = "Simple Prolog Interpreter in Scala"
 
@@ -13,17 +14,19 @@ object  Main {
 		val p = new Prolog()		
 
 		p.consult("initial.pl")
-		print(prompt)
 
-		for ( line <- io.Source.stdin.getLines ) {
+		val console = new ConsoleReader()
+		console.setPrompt("? ")
+		while (true) {
+			var line = console.readLine()
 			try {
 					line match {
 						case "\\q" 	=> System.exit(0)
 						case "\\l" 	=> println(p.database.mkString("\n"))
 						case _ 		=> p.solve(List(PrologParser.parse(line)), Success(), 1)
 					}
-			} catch { case e: Exception => println(e) }
-			print(prompt)
+			} 
+			catch { case e: Exception => println(e) }
 		}
 	}
 }
