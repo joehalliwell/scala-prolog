@@ -137,6 +137,9 @@ case class Atom(name: String) extends Term {
 case class Number(value: Double) extends Term {
 	override def toString = value.toString
 }
+case class Str(value: String) extends Term {
+	override def toString = value
+}
 case class Predicate(name: String, adicity: Int, args: Seq[Term]) extends Term {
 	override def toString = name + "(" + args.mkString(",") + ")"
 	override def renameVars(level: Int) = Predicate(name, adicity, args.map(_.renameVars(level)))
@@ -153,12 +156,16 @@ case class Variable(name: String, level: Int = 0) extends Term with Ordered[Vari
 // PARSER
 object PrologParser extends JavaTokenParsers {
 	def atom: 		Parser[Atom]		= """[a-z]\w*""".r ^^ { Atom(_) }
-	def number:		Parser[Number]		= """\d+(.\d+)?""".r ^^ { case v => Number(v.toDouble) }
+	def number:		Parser[Number]		= decimalNumber ^^ { case v => Number(v.toDouble) }
+	def str:		Parser[Str]			= "\"" ~> """([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*""".r <~"\"" ^^ {
+		// TODO: Other escape codes
+		case v => Str(v.replaceAll("\\\\n","\n"))
+	}
 	def variable:	Parser[Variable]	= """[A-Z]\w*""".r ^^ { case name => Variable(name) }
 	def predicate: 	Parser[Predicate]	= """[a-z]\w*""".r ~ ("(" ~> repsep(term, ",") <~ ")") ^^ {
 		case head ~ args => Predicate(head, args.length, List() ++ args)
 	}
-	def term:		Parser[Term]		= predicate | number | atom | variable
+	def term:		Parser[Term]		= predicate | number | str | atom | variable
 	def sentence:	Parser[Term] 		= term <~ "."
 
 	def parse(s: String): Term = parseAll(sentence, s) match {
