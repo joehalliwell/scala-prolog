@@ -73,6 +73,10 @@ class Prolog {
 				assert(args.head)
 				solve(rest, env, level + 1)
 			}
+			case Predicate("write", 1, args) :: rest => {
+				print(args.head)
+				solve(rest, env, level + 1)
+			}
 			// Depth-first search
 			case goal :: rest => {
 				//println("T: " + goal + " " + env)
