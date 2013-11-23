@@ -158,18 +158,18 @@ object EmptyList extends Atom("[]")
 object PrologParser extends JavaTokenParsers {
 	def atom: 		Parser[Atom]		= """[a-z]\w*""".r ^^ { Atom(_) }
 	def number:		Parser[Number]		= decimalNumber ^^ { case v => Number(v.toDouble) }
-	def str:			Parser[Str]			= "\"" ~> """([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*""".r <~"\"" ^^ {
+	def str:		Parser[Str]			= "\"" ~> """([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*""".r <~"\"" ^^ {
 		// TODO: Other escape codes
 		case v => Str(v.replaceAll("\\\\n","\n"))
 	}
-	def variable:		Parser[Variable]	= """[A-Z]\w*""".r ^^ { case name => Variable(name) }
+	def variable:	Parser[Variable]	= """[A-Z]\w*""".r ^^ { case name => Variable(name) }
 	def predicate: 	Parser[Predicate]	= """[a-z]\w*""".r ~ ("(" ~> repsep(term, ",") <~ ")") ^^ {
 		case head ~ args => Predicate(head, args.length, List() ++ args)
 	}
-	def list:				Parser[Term] = "[" ~> listbody <~ "]"
-	def listbody: 	Parser[Term] = repsep(term, ",") ~ opt("|" ~> (variable | list)) ^^ {
-		case headList ~ Some(tail)			=> list(headList, tail)
-		case headList ~ None						=> list(headList, EmptyList)
+	def list:		Parser[Term] 		= "[" ~> listbody <~ "]"
+	def listbody: 	Parser[Term] 		= repsep(term, ",") ~ opt("|" ~> (variable | list)) ^^ {
+		case headList ~ Some(tail)	=> list(headList, tail)
+		case headList ~ None				=> list(headList, EmptyList)
 	}
 	def term:		Parser[Term]		= predicate | number | str | atom | variable | list
 	def sentence:	Parser[Term] 		= term <~ "."
