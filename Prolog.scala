@@ -23,7 +23,8 @@ object Main {
 					line match {
 						case "\\q" 	=> System.exit(0)
 						case "\\l" 	=> println(p.database.mkString("\n"))
-						case _ 		=> p.solve(Seq(PrologParser.parse(line)), Success(), 1)
+						case "\\?"	=> println("\\q\tquit\n\\l\tlist\n\\?\thelp\n")
+						case _ 		=> p.solve(PrologParser.parse(line))
 					}
 			} 
 			catch { case e: Exception => println(e) }
@@ -67,6 +68,8 @@ class Prolog {
 		case default => print(term)
 	}
 
+	def solve(term: Term): Unit = solve(Seq(term), Success(), 1)
+
 	def solve(goalList: Seq[Term], env: Env, level: Int): Unit = env match 
 	{
 		case env: Fail => env // Fail fast
@@ -81,20 +84,24 @@ class Prolog {
 			// Built-ins go here
 			case Predicate("assert", 1, args) :: rest => {
 				assert(args.head)
-				solve(rest, env, level + 1)
+				solve(rest, env, level)
 			}
 			case Predicate("write", 1, args) :: rest => {
 				write(args.head, env)
-				solve(rest, env, level + 1)
+				solve(rest, env, level)
+			}
+			case Predicate("consult", 1, args) :: rest => {
+				consult(args.head.toString)
+				solve(rest, env, level)
 			}
 			// Depth-first search
 			case goal :: rest => {
 				//println("T: " + goal + " " + env)
 				for (fact <- database) fact match {
 					case Predicate("rule", _, args) => solve(
-						args.tail.map(_.renameVars(level)) ++ rest,
-						env.unify((goal, args.head.renameVars(level))),
-						level + 1) 
+														args.tail.map(_.renameVars(level)) ++ rest,
+														env.unify((goal, args.head.renameVars(level))),
+														level + 1) 
 					case default 					=> solve(rest, env.unify((goal, fact)), level + 1)
 				}
 				if (level == 1) println("No.")
@@ -135,12 +142,8 @@ case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) exten
 	def print() =
 	{
 		val topLevel = binding.filter(x => x._1.level == 0)
-		if (topLevel.size == 0) {
-			println ("Yes")
-		}
-		else topLevel.foreach {
-			case (k, v) => println(k + "=" + v)
-		}
+		if (topLevel.size == 0) println ("Yes.")
+		else topLevel.foreach { case (k, v) => println(k + "=" + v) }
 	}
 }
 
@@ -214,5 +217,4 @@ object PrologParser extends JavaTokenParsers {
 		case Nil => tail
 		case default => Predicate(List.Predicate, 2, Seq(args.head, list(args.tail, tail)))
 	}
-
 }
