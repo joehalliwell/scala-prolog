@@ -19,3 +19,7 @@ child(george1, sophia).
 rule(parent(X, Y), child(Y, X)).
 
 rule(daughter(X, Y), female(X), child(X, Y)).
+rule(writeln(X), write(X), write("\n")).
+
+rule(member(X, [X|T])).
+rule(member(X, [H|T]), member(X, T)).
