@@ -1,4 +1,6 @@
 import scala.util.parsing.combinator._
+import scala.util.parsing.combinator.syntactical._
+import scala.util.parsing.input._
 import scala.collection.immutable._
 import scala.tools.jline.console._
 
@@ -32,9 +34,11 @@ object Main {
 	}
 }
 
+
 class Prolog {
 
 	val database = scala.collection.mutable.MutableList[Term]()
+	type Builtin = (Seq[Term], Env) => Env
 
 	def assert(fact: Term) { database += fact }
 
@@ -68,45 +72,71 @@ class Prolog {
 		case default => print(term)
 	}
 
+	def evaluate(term: Term, env: Success): Double = term match {
+		case x: Number 				=> x.value
+		case v: Variable 			=> env.binding.get(v) match {
+			case None				=> throw new Exception("Unbound variable on RHS");
+			case Some(term)			=> evaluate(term, env)
+		}
+		case Predicate("+", 2, args) => evaluate(args.head, env) + evaluate(args.tail.head, env)
+		case Predicate("*", 2, args) => evaluate(args.head, env) * evaluate(args.tail.head, env)
+		case Predicate("-", 2, args) => evaluate(args.head, env) - evaluate(args.tail.head, env)
+		case Predicate("/", 2, args) => evaluate(args.head, env) / evaluate(args.tail.head, env)
+	}
+
 	def solve(term: Term): Unit = solve(Seq(term), Success(), 1)
 
-	def solve(goalList: Seq[Term], env: Env, level: Int): Unit = env match 
+	// TODO: Rewrite as non-recursive?
+	def solve(goalList: Seq[Term], env: Env, level: Int): Unit =
 	{
-		case env: Fail => env // Fail fast
-		case env: Success => goalList match {
-			// We have a solution!
-			case Nil => {
-				env.print()
-				println("More?")
-				if (readLine().trim().startsWith("n")) throw new Exception("Interrupted")
-				println("")
-			}
-			// Built-ins go here
-			case Predicate("assert", 1, args) :: rest => {
-				assert(args.head)
-				solve(rest, env, level)
-			}
-			case Predicate("write", 1, args) :: rest => {
-				write(args.head, env)
-				solve(rest, env, level)
-			}
-			case Predicate("consult", 1, args) :: rest => {
-				consult(args.head.toString)
-				solve(rest, env, level)
-			}
-			// Depth-first search
-			case goal :: rest => {
-				//println("T: " + goal + " " + env)
-				for (fact <- database) fact match {
-					case Predicate("rule", _, args) => solve(
-														args.tail.map(_.renameVars(level)) ++ rest,
-														env.unify((goal, args.head.renameVars(level))),
-														level + 1) 
-					case default 					=> solve(rest, env.unify((goal, fact)), level + 1)
+		env match {
+			case env: Fail => env // Fail fast
+			case env: Success => {
+				goalList match {
+				// We have a solution!
+				case Nil => {
+					env.print()
+					println("More y/n?")
+					if (readLine().trim().startsWith("n")) throw new Exception("Interrupted")
+					println("")
 				}
-				if (level == 1) println("No.")
+				// Built-ins go here
+				case Predicate("assert", 1, args) :: rest => {
+					assert(args.head)
+					solve(rest, env, level)
+				}
+				case Predicate("write", 1, args) :: rest => {
+					write(args.head, env)
+					solve(rest, env, level)
+				}
+				case Predicate("consult", 1, args) :: rest => {
+					consult(args.head.toString)
+					solve(rest, env, level)
+				}
+				case Predicate("=", 2, args) :: rest => {
+					solve(rest, env.unify(args.head, args.tail.head), level)
+				}
+				case Predicate("is", 2, args) :: rest => {
+					var rhs = evaluate(args.tail.head, env)
+					solve(rest, env.unify(args.head, Number(rhs)), level)
+				}
+				// Depth-first search
+				case goal :: rest => {
+					//println("T: " + goal + " " + env)
+					for (fact <- database) fact match {
+						case Predicate("rule", _, args) => 
+							solve(
+								args.tail.map(_.renameVars(level)) ++ rest,
+								env.unify((goal, args.head.renameVars(level))),
+								level + 1) 
+						case default 					=> 
+							solve(rest, env.unify((goal, fact.renameVars(level))), level + 1)
+					}
+					if (level == 1) println("No.")
+				}
 			}
-		}
+		}	
+	}
 	}
 }
 
@@ -114,12 +144,16 @@ abstract class Env { def unify(terms: (Term, Term)) = this }
 case class Fail() extends Env
 case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) extends Env {
 	
-	def bind(orig: Variable, v: Variable, t: Term): Env = binding.get(v) match {
-		case None => Success(binding + (v -> t))
-		case Some(v2) => v2 match {
-			case v2: Variable => if (orig.equals(v2)) Fail() else bind(orig, v2, t)
-			case t2: Term if (t.equals(t2)) => this
-			case default => Fail()
+	def bind(orig: Variable, v: Variable, t: Term): Env =
+	{
+		//println("B: " + v + "=" + t)	
+		binding.get(v) match {
+			case None => Success(binding + (v -> t))
+			case Some(v2) => v2 match {
+				case v2: Variable => if (orig.equals(v2)) Fail() else bind(orig, v2, t)
+				case t2: Term if (t.equals(t2)) => this
+				case default => unify(v2, t)
+			}
 		}
 	}
 	
@@ -127,7 +161,6 @@ case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) exten
 	// TODO: Add note on case ordering (it's important!)
 	override def unify(terms: (Term, Term)): Env = 
 	{
-		//println("U: " + terms + " in " + env)
 		return terms match {
 			case (t1: Atom, t2: Atom) if (t1 == t2) => this
 			case (t1, t2: Variable) => bind(t2, t2, t1)
@@ -170,12 +203,12 @@ case class Predicate(name: String, arity: Int, args: Seq[Term]) extends Term {
 	def unpackList() : Seq[Term] = args.tail.head match {
 		case List.Empty 		=> Seq(args.head)
 		case tail: Predicate 	=> Seq(args.head) ++ tail.unpackList()
-		case default			=> Seq(args.head, args.tail.head)
+		case default			=> Seq(args.head, Atom("|"), args.tail.head)
 	}
 }
 
 case class Variable(name: String, level: Int = 0) extends Term with Ordered[Variable] {
-	override def toString = name //+ "_" + level
+	override def toString = name + "_" + level
 	override def renameVars(level: Int) = Variable(name, level)
 	def compare(other: Variable): Int = name.compareTo(other.name) match {
 		case 0 => level.compareTo(other.level)
@@ -189,9 +222,9 @@ object List {
 }
 
 // Parser
-object PrologParser extends JavaTokenParsers {
+object PrologParser extends RegexParsers with PackratParsers {
 	def atom: 		Parser[Atom]		= """[a-z]\w*""".r ^^ { Atom(_) }
-	def number:		Parser[Number]		= decimalNumber ^^ { case v => Number(v.toDouble) }
+	def number:		Parser[Number]		= """(\d+(\.\d*)?|\d*\.\d+)""".r ^^ { case v => Number(v.toDouble) }
 	def str:		Parser[Str]			= "\"" ~> """([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*""".r <~"\"" ^^ {
 		// TODO: Other escape codes
 		case v => Str(v.replaceAll("\\\\n","\n"))
@@ -200,14 +233,18 @@ object PrologParser extends JavaTokenParsers {
 	def predicate: 	Parser[Predicate]	= """[a-z]\w*""".r ~ ("(" ~> repsep(term, ",") <~ ")") ^^ {
 		case head ~ args => Predicate(head, args.length, args)
 	}
+	// TODO: Allow infix operators to be user defined
+	lazy val infix:	PackratParser[Predicate] = (term ~ """[-=+*/]|is""".r ~ term) ^^ {
+		case left ~ op ~ right => Predicate(op, 2, Seq(left, right))
+	}
 	def list:		Parser[Term] 		= "[" ~> listbody <~ "]"
 	def listbody: 	Parser[Term] 		= repsep(term, ",") ~ opt("|" ~> (variable | list)) ^^ {
 		case headList ~ Some(tail)	=> list(headList, tail)
 		case headList ~ None		=> list(headList, List.Empty)
 	}
-	def term:		Parser[Term]		= predicate | number | str | atom | variable | list
-	def sentence:	Parser[Term] 		= term <~ "."
-	def parse(s: String): Term = parseAll(sentence, s) match {
+	lazy val term:		PackratParser[Term]		= predicate | infix | atom | variable | number | str | list
+	lazy val sentence:	PackratParser[Term] 	= term <~ "."
+	def parse(s: String): Term = phrase(sentence)(new PackratReader(new CharSequenceReader(s))) match {
 		case Success(result, _) => result
 		case failure : NoSuccess => scala.sys.error(failure.msg) // throws a runtime exception!	
 	}
