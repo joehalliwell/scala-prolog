@@ -3,6 +3,9 @@ import scala.util.parsing.combinator.syntactical._
 import scala.util.parsing.input._
 import scala.collection.immutable._
 import scala.tools.jline.console._
+import scala.annotation.tailrec
+import scala.util.continuations._
+
 
 /*
  * An experiment with writing a Prolog interpreter in Scala
@@ -44,7 +47,9 @@ class Prolog {
 	val database = scala.collection.mutable.MutableList[Term]()
 	type Builtin = (Seq[Term], Env) => Env
 
-	def assert(fact: Term) = { database += fact }
+	def assert(fact: Term) = { 
+		database += fact
+	}
 
 	def consult(filename: String) = {
 		println("Loading " + filename)
@@ -67,19 +72,20 @@ class Prolog {
 		}
 	}
 
-	def write(term: Term, env: Success): Unit = term match 
-	{
+	def write(term: Term, env: Success): Unit = term match {
 		case v: Variable => env.binding.get(v) match {
 			case Some(t: Term) 	=> write(t, env)
 			case None			=> print(v)
 		}
 		case default => print(term)
-	}
+	}	
+
 
 	/**
-	 * Simple arithmetic expression evaluator
+	 * Simple arithmetic expression evaluator.
+	 * TODO: Handle brackets? Can this be made tail-recursive?
 	 */
-	def evaluate(term: Term, env: Success): Double = term match {
+	private final def evaluate(term: Term, env: Success): Double = term match {
 		case x: Number 				=> x.value
 		case v: Variable 			=> env.binding.get(v) match {
 			case None				=> throw new Exception("Unbound variable on RHS");
@@ -91,10 +97,10 @@ class Prolog {
 		case Predicate("/", 2, args) => evaluate(args.head, env) / evaluate(args.tail.head, env)
 	}
 
-	def solve(term: Term): Unit = solve(Seq(term), Success(), 1)
+	final def solve(term: Term): Unit = solve(Seq(term), Success(), 1)
 
 	// TODO: Rewrite as non-recursive?
-	def solve(goalList: Seq[Term], env: Env, level: Int): Unit = {
+	private final def solve(goalList: Seq[Term], env: Env, level: Int): Env = {
 		env match {
 			case env: Fail => env // Fail fast
 			case env: Success => {
@@ -104,7 +110,7 @@ class Prolog {
 					env.print()
 					println("More y/n?")
 					if (readLine().trim().startsWith("n")) throw new Exception("Interrupted")
-					println("")
+					Fail()
 				}
 				// Handle built-ins
 				case Predicate("assert", 1, args) :: rest => {
@@ -138,10 +144,10 @@ class Prolog {
 						case default 					=> 
 							solve(rest, env.unify((goal, fact.renameVars(level))), level + 1)
 					}
-					if (level == 1) println("No.")
+					Fail()
 				}
 			}
-		}	
+		}
 	}
 	}
 }
@@ -158,6 +164,7 @@ case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) exten
 		binding.get(v) match {
 			case None => Success(binding + (v -> t))
 			case Some(v2) => v2 match {
+				// Disallow circularities
 				case v2: Variable => if (orig.equals(v2)) Fail() else bind(orig, v2, t)
 				case t2: Term if (t.equals(t2)) => this
 				case default => unify(v2, t)
@@ -167,17 +174,16 @@ case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) exten
 	
 	// Unify two terms, extending our bindings
 	// TODO: Add note on case ordering (it's important!)
-	override def unify(terms: (Term, Term)): Env = {
-		return terms match {
-			case (t1: Atom, t2: Atom) if (t1 == t2) => this
-			case (t1, t2: Variable) => bind(t2, t2, t1)
-			case (t1: Variable, t2) => bind(t1, t1, t2)
-			case (t1: Predicate, t2: Predicate) if (t1.name == t2.name && t1.arity == t2.arity) 
-				// This is neat, but inefficient! Is there a nice way to write it?
-				=> t1.args.zip(t2.args).foldLeft(this: Env)((x,y) => x.unify(y))
-			case _ => Fail()
-		}
+	override def unify(terms: (Term, Term)): Env = terms match {
+		case (t1: Atom, t2: Atom) if (t1 == t2) => this
+		case (t1, t2: Variable) => bind(t2, t2, t1)
+		case (t1: Variable, t2) => bind(t1, t1, t2)
+		case (t1: Predicate, t2: Predicate) if (t1.name == t2.name && t1.arity == t2.arity) 
+			// This is neat, but inefficient! Is there a nice way to write it?
+			=> t1.args.zip(t2.args).foldLeft(this: Env)((x,y) => x.unify(y))
+		case _ => Fail()
 	}
+
 	
 	def print() = {
 		val topLevel = binding.filter(x => x._1.level == 0)
@@ -189,7 +195,7 @@ case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) exten
 /**
  * AST for Prolog
  */
-abstract class Term {
+sealed trait Term {
 	def renameVars(level: Int) = this
 }
 case class Atom(name: String) extends Term {
