@@ -4,13 +4,16 @@ import scala.util.parsing.input._
 import scala.collection.immutable._
 import scala.tools.jline.console._
 
-// An experiment with writing a Prolog interpreter in Scala
+/*
+ * An experiment with writing a Prolog interpreter in Scala
+ * @author Joe Halliwell <joe.halliwell@gmail.com>
+ */
 
-object Main {
+object Prolog {
 	val prompt = "\n? "
 	val welcome = "Simple Prolog Interpreter in Scala"
 
-	def main(args: Array[String]) {
+	def main(args: Array[String]) = {
 		println(welcome)
 		println("-" * welcome.length)
 		val p = new Prolog()		
@@ -19,15 +22,17 @@ object Main {
 
 		val console = new ConsoleReader()
 		console.setPrompt("? ")
+		
+		// The REPL
 		while (true) {
 			var line = console.readLine()
 			try {
-					line match {
-						case "\\q" 	=> System.exit(0)
-						case "\\l" 	=> println(p.database.mkString("\n"))
-						case "\\?"	=> println("\\q\tquit\n\\l\tlist\n\\?\thelp\n")
-						case _ 		=> p.solve(PrologParser.parse(line))
-					}
+				line match {
+					case "\\q" 	=> System.exit(0)
+					case "\\l" 	=> println(p.database.mkString("\n"))
+					case "\\?"	=> println("\\q\tquit\n\\l\tlist\n\\?\thelp\n")
+					case _ 		=> p.solve(PrologParser.parse(line))
+				}
 			} 
 			catch { case e: Exception => println(e) }
 		}
@@ -36,13 +41,12 @@ object Main {
 
 
 class Prolog {
-
 	val database = scala.collection.mutable.MutableList[Term]()
 	type Builtin = (Seq[Term], Env) => Env
 
-	def assert(fact: Term) { database += fact }
+	def assert(fact: Term) = { database += fact }
 
-	def consult(filename: String) {
+	def consult(filename: String) = {
 		println("Loading " + filename)
 		var lineNumber = -1;
 		try {
@@ -72,6 +76,9 @@ class Prolog {
 		case default => print(term)
 	}
 
+	/**
+	 * Simple arithmetic expression evaluator
+	 */
 	def evaluate(term: Term, env: Success): Double = term match {
 		case x: Number 				=> x.value
 		case v: Variable 			=> env.binding.get(v) match {
@@ -87,8 +94,7 @@ class Prolog {
 	def solve(term: Term): Unit = solve(Seq(term), Success(), 1)
 
 	// TODO: Rewrite as non-recursive?
-	def solve(goalList: Seq[Term], env: Env, level: Int): Unit =
-	{
+	def solve(goalList: Seq[Term], env: Env, level: Int): Unit = {
 		env match {
 			case env: Fail => env // Fail fast
 			case env: Success => {
@@ -100,7 +106,7 @@ class Prolog {
 					if (readLine().trim().startsWith("n")) throw new Exception("Interrupted")
 					println("")
 				}
-				// Built-ins go here
+				// Handle built-ins
 				case Predicate("assert", 1, args) :: rest => {
 					assert(args.head)
 					solve(rest, env, level)
@@ -140,12 +146,14 @@ class Prolog {
 	}
 }
 
-abstract class Env { def unify(terms: (Term, Term)) = this }
+/*
+ * Bindings
+ */
+sealed trait Env { def unify(terms: (Term, Term)) = this }
 case class Fail() extends Env
 case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) extends Env {
 	
-	def bind(orig: Variable, v: Variable, t: Term): Env =
-	{
+	def bind(orig: Variable, v: Variable, t: Term): Env = {
 		//println("B: " + v + "=" + t)	
 		binding.get(v) match {
 			case None => Success(binding + (v -> t))
@@ -159,8 +167,7 @@ case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) exten
 	
 	// Unify two terms, extending our bindings
 	// TODO: Add note on case ordering (it's important!)
-	override def unify(terms: (Term, Term)): Env = 
-	{
+	override def unify(terms: (Term, Term)): Env = {
 		return terms match {
 			case (t1: Atom, t2: Atom) if (t1 == t2) => this
 			case (t1, t2: Variable) => bind(t2, t2, t1)
@@ -172,15 +179,16 @@ case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) exten
 		}
 	}
 	
-	def print() =
-	{
+	def print() = {
 		val topLevel = binding.filter(x => x._1.level == 0)
 		if (topLevel.size == 0) println ("Yes.")
 		else topLevel.foreach { case (k, v) => println(k + "=" + v) }
 	}
 }
 
-// TERM TREE
+/**
+ * AST for Prolog
+ */
 abstract class Term {
 	def renameVars(level: Int) = this
 }
