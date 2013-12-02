@@ -16,39 +16,74 @@ object Prolog {
 	val prompt = "\n? "
 	val welcome = "Simple Prolog Interpreter in Scala"
 
+	val EmptyList = Atom("[]")
+	val ListPredicate = "."
+	val p = new Prolog()		
+	val console = new ConsoleReader()
+	
 	def main(args: Array[String]) = {
-		println(welcome)
-		println("-" * welcome.length)
-		val p = new Prolog()		
-
-		p.consult("initial.pl")
-
-		val console = new ConsoleReader()
+		
 		console.setPrompt("? ")
 		
+		console.println(welcome)
+		console.println("-" * welcome.length)
+		
+		p.consult("initial.pl")
+
 		// The REPL
 		while (true) {
-			var line = console.readLine()
 			try {
-				line match {
-					case "\\q" 	=> System.exit(0)
-					case "\\l" 	=> println(p.database.mkString("\n"))
-					case "\\?"	=> println("\\q\tquit\n\\l\tlist\n\\?\thelp\n")
-					case _ 		=> p.solve(PrologParser.parse(line))
-				}
+				process(console.readLine())				
 			} 
-			catch { case e: Exception => println(e) }
+			catch { 
+				case t: Throwable => t.printStackTrace();
+			}
 		}
+	}
+
+	def process(line: String) = line match {
+		case "\\q" 	=> System.exit(0)
+		case "\\l" 	=> console.println(p.database.mkString("\n"))
+		case "\\?"	=> console.println("\\q\tquit\n\\l\tlist\n\\?\thelp\n")
+		case "\\t"	=> {
+			p.trace = !p.trace
+			console.println("Tracing " + (if (p.trace) "on" else "off") + ".")
+		}
+		case _ 		=> prove(PrologParser.parse(line))
+	}
+
+
+	def prove(goal: Term) {
+		var solution = p.State(Seq(goal), Seq(), -1)
+		
+		@tailrec def next(solution: p.State): Unit = p.solve(solution) match {
+			case None => {
+				println("No.")
+			}
+			case Some(solution) => {
+				println(solution.env)
+				if (!solution.mayHaveMore) {
+					println("Yes.")
+				}
+				else {
+					console.print("More y/n")
+					if (console.readLine().startsWith("y")) next(solution)
+				}
+			}
+		}
+		next(solution)
 	}
 }
 
 
 class Prolog {
-	val database = scala.collection.mutable.MutableList[Term]()
+	var database = scala.collection.mutable.MutableList[Term]()
 	type Builtin = (Seq[Term], Env) => Env
 
+	var trace = false;
+
 	def assert(fact: Term) = { 
-		database += fact
+		database = database ++ Seq(fact)
 	}
 
 	def consult(filename: String) = {
@@ -78,8 +113,7 @@ class Prolog {
 			case None			=> print(v)
 		}
 		case default => print(term)
-	}	
-
+	}
 
 	/**
 	 * Simple arithmetic expression evaluator.
@@ -97,67 +131,120 @@ class Prolog {
 		case Predicate("/", 2, args) => evaluate(args.head, env) / evaluate(args.tail.head, env)
 	}
 
-	final def solve(term: Term): Unit = solve(Seq(term), Success(), 1)
+	// TODO: Hide this implementation detail -- by returning an Env thunk?
 
-	// TODO: Rewrite as non-recursive?
-	private final def solve(goalList: Seq[Term], env: Env, level: Int): Env = {
-		env match {
-			case env: Fail => env // Fail fast
-			case env: Success => {
-				goalList match {
-				// We have a solution!
-				case Nil => {
-					env.print()
-					println("More y/n?")
-					if (readLine().trim().startsWith("n")) throw new Exception("Interrupted")
-					Fail()
+	case class Stackframe(goal: Term, env: Success, index: Int)
+
+	// Index scrolls through the database, but it also used as flag
+	// to indicate that built-in procedures have been tried.
+	// It is assumed they can only complete in one way.
+	case class State(goals: Seq[Term], stack: Seq[Stackframe], index: Int) {
+		def env 					= if (stack.isEmpty) Success() 	else stack.head.env
+ 		def pop():  Option[State] 	= if (stack.isEmpty) None 		else Some(State(stack.head.goal +: goals, stack.tail, stack.head.index + 1))
+		def push(): Option[State] 	= push(env, 0)
+		def push(env: Env, index: Int): Option[State] = env match {
+			case env: Success => Some(State(goals.tail, Stackframe(goals.head, env, index) +: stack, -1))
+			case Fail() => None
+		}
+		def isSolution = (goals.length == 0)
+		def mayHaveMore = !env.binding.isEmpty
+	}
+
+	// Unused?
+	def solve(term: Term): Option[State] = solve(State(Seq(term), Seq(), -1))
+
+	// Find a solution
+	def solve(initialState: State): Option[State] = {
+
+		@tailrec def step(s: Option[State]): Option[State] = {
+			if (trace) println(s)
+			s match {
+				case None => None
+				case Some(s) if s.isSolution => Some(s)
+				case Some(s) => step(tryBuiltins(s))
+			}
+		}
+
+		step(if (initialState.isSolution) initialState.pop() else Some(initialState))
+	}
+	
+	def tryBuiltins(state: State): Option[State] = {
+		if (state.index > -1) return trySearch(state) // HACK!
+		//println("Checking for builtins...")
+		state.goals.head match {
+			case Atom("!") => {
+				Some(State(state.goals.tail, Seq(Stackframe(Atom("!"), state.env, 0)), -1)) // No backtracking!
+			}
+			case Predicate("assert", 1, args) => {
+				assert(args.head)
+				state.push()
+			}
+			case Predicate("write", 1, args) => {
+				write(args.head, state.env)
+				state.push()
+			}
+			case Predicate("consult", 1, args) => {
+				consult(args.head.toString)
+				state.push()
+			}
+			case Predicate("=", 2, args) => {
+				state.env.unify((args.head, args.tail.head)) match {
+					case Fail() => state.pop()
+					case env: Success => state.push(env, -1)
 				}
-				// Handle built-ins
-				case Predicate("assert", 1, args) :: rest => {
-					assert(args.head)
-					solve(rest, env, level)
+			}
+			case Predicate("is", 2, args) => {
+				var rhs = evaluate(args.tail.head, state.env)
+				state.env.unify((args.head, Number(rhs))) match {
+					case Fail() => state.pop()
+					case env: Success => state.push(env, -1)
 				}
-				case Predicate("write", 1, args) :: rest => {
-					write(args.head, env)
-					solve(rest, env, level)
-				}
-				case Predicate("consult", 1, args) :: rest => {
-					consult(args.head.toString)
-					solve(rest, env, level)
-				}
-				case Predicate("=", 2, args) :: rest => {
-					solve(rest, env.unify(args.head, args.tail.head), level)
-				}
-				case Predicate("is", 2, args) :: rest => {
-					var rhs = evaluate(args.tail.head, env)
-					solve(rest, env.unify(args.head, Number(rhs)), level)
-				}
-				// Depth-first search
-				case goal :: rest => {
-					//println("T: " + goal + " " + env)
-					for (fact <- database) fact match {
-						case Predicate("rule", _, args) => 
-							solve(
-								args.tail.map(_.renameVars(level)) ++ rest,
-								env.unify((goal, args.head.renameVars(level))),
-								level + 1) 
-						case default 					=> 
-							solve(rest, env.unify((goal, fact.renameVars(level))), level + 1)
+			}
+			case default => Some(State(state.goals, state.stack, 0))
+		}
+	}
+
+	def trySearch(state: State): Option[State] = {
+		//println("Searching database...")
+		for (index <- state.index until database.length) {
+			database(index) match {
+				// Rules
+				case Predicate("rule", _, args) => { 
+					state.env.unify((state.goals.head, args.head.renameVars(state.stack.length + 1))) match {
+						case env: Success => {
+							//println("Matched rule...")
+							return Some(State(
+								args.tail.map(_.renameVars(state.stack.length + 1)) ++ state.goals.tail, 
+								new Stackframe(state.goals.head, env, index) +: state.stack, -1))
+						}
+						case default => //Option.empty[State]
 					}
-					Fail()
+				}
+				// Simple facts
+				case fact => {
+					state.env.unify((state.goals.head, fact.renameVars(state.stack.length + 1))) match {
+						case env: Success => {
+							//println("Matched fact...")
+							//env.print()
+							return state.push(env, index)
+						}
+						case default => //Option.empty[State]
+					}
 				}
 			}
 		}
+		return None
 	}
-	}
+
 }
 
 /*
  * Bindings
+ * TODO: Occurs check
  */
-sealed trait Env { def unify(terms: (Term, Term)) = this }
+sealed trait Env {def unify(terms: (Term, Term)) = this }
 case class Fail() extends Env
-case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) extends Env {
+case class Success(binding: Map[Variable,Term] = Map[Variable,Term]()) extends Env {
 	
 	def bind(orig: Variable, v: Variable, t: Term): Env = {
 		//println("B: " + v + "=" + t)	
@@ -184,11 +271,8 @@ case class Success(binding: Map[Variable,Term] = TreeMap[Variable,Term]()) exten
 		case _ => Fail()
 	}
 
-	
-	def print() = {
-		val topLevel = binding.filter(x => x._1.level == 0)
-		if (topLevel.size == 0) println ("Yes.")
-		else topLevel.foreach { case (k, v) => println(k + "=" + v) }
+	override def toString() = {
+		binding.filter(x => x._1.level == 0).map(x => x._1.name + "=" + x._2).mkString("\n")
 	}
 }
 
@@ -209,18 +293,17 @@ case class Str(value: String) extends Term {
 }
 case class Predicate(name: String, arity: Int, args: Seq[Term]) extends Term {
 	override def toString = name match {
-		case List.Predicate => "[" + unpackList().mkString(", ") + "]"
+		case Prolog.ListPredicate => "[" + unpackList().mkString(", ") + "]"
 		case default 		=> name + "(" + args.mkString(", ") + ")"
 	}
 	override def renameVars(level: Int) = Predicate(name, arity, args.map(_.renameVars(level)))
 
 	def unpackList() : Seq[Term] = args.tail.head match {
-		case List.Empty 		=> Seq(args.head)
+		case Prolog.EmptyList 	=> Seq(args.head)
 		case tail: Predicate 	=> Seq(args.head) ++ tail.unpackList()
 		case default			=> Seq(args.head, Atom("|"), args.tail.head)
 	}
 }
-
 case class Variable(name: String, level: Int = 0) extends Term with Ordered[Variable] {
 	override def toString = name + "_" + level
 	override def renameVars(level: Int) = Variable(name, level)
@@ -230,15 +313,11 @@ case class Variable(name: String, level: Int = 0) extends Term with Ordered[Vari
 	}
 }
 
-object List {
-	val Empty = Atom("[]")
-	val Predicate = "."
-}
 
 // Parser
 object PrologParser extends RegexParsers with PackratParsers {
-	def atom: 		Parser[Atom]		= """[a-z]\w*""".r ^^ { Atom(_) }
-	def number:		Parser[Number]		= """(\d+(\.\d*)?|\d*\.\d+)""".r ^^ { case v => Number(v.toDouble) }
+	def atom: 		Parser[Atom]		= """!|[a-z]\w*""".r ^^ { Atom(_) }
+	def number:		Parser[Number]		= """(\d+(\.\d+)?|\d*\.\d+)""".r ^^ { case v => Number(v.toDouble) }
 	def str:		Parser[Str]			= "\"" ~> """([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*""".r <~"\"" ^^ {
 		// TODO: Other escape codes
 		case v => Str(v.replaceAll("\\\\n","\n"))
@@ -249,12 +328,12 @@ object PrologParser extends RegexParsers with PackratParsers {
 	}
 	// TODO: Allow infix operators to be user defined
 	lazy val infix:	PackratParser[Predicate] = (term ~ """[-=+*/]|is""".r ~ term) ^^ {
-		case left ~ op ~ right => Predicate(op, 2, Seq(left, right))
+		case left ~ op ~ right => Predicate(op, 2, List(left, right))
 	}
 	def list:		Parser[Term] 		= "[" ~> listbody <~ "]"
 	def listbody: 	Parser[Term] 		= repsep(term, ",") ~ opt("|" ~> (variable | list)) ^^ {
 		case headList ~ Some(tail)	=> list(headList, tail)
-		case headList ~ None		=> list(headList, List.Empty)
+		case headList ~ None		=> list(headList, Prolog.EmptyList)
 	}
 	lazy val term:		PackratParser[Term]		= predicate | infix | atom | variable | number | str | list
 	lazy val sentence:	PackratParser[Term] 	= term <~ "."
@@ -266,6 +345,6 @@ object PrologParser extends RegexParsers with PackratParsers {
 	// Helper function to make lists
 	def list(args: Seq[Term], tail: Term): Term = args match {
 		case Nil => tail
-		case default => Predicate(List.Predicate, 2, Seq(args.head, list(args.tail, tail)))
+		case default => Predicate(Prolog.ListPredicate, 2, Seq(args.head, list(args.tail, tail)))
 	}
 }
