@@ -161,7 +161,8 @@ class Prolog {
 			s match {
 				case None => None
 				case Some(s) if s.isSolution => Some(s)
-				case Some(s) => step(tryBuiltins(s))
+				case Some(s) if s.index == -1 => step(tryBuiltins(s))
+				case Some(s) => step(trySearch(s))
 			}
 		}
 
@@ -169,7 +170,7 @@ class Prolog {
 	}
 	
 	def tryBuiltins(state: State): Option[State] = {
-		if (state.index > -1) return trySearch(state) // HACK!
+		//if (state.index > -1) return trySearch(state) // HACK!
 		//println("Checking for builtins...")
 		state.goals.head match {
 			case Atom("!") => {
@@ -271,8 +272,17 @@ case class Success(binding: Map[Variable,Term] = Map[Variable,Term]()) extends E
 		case _ => Fail()
 	}
 
+	def extract(t: Term): Term = t match {
+		case Predicate(name, arity, args) => Predicate(name, arity, args.map(x => extract(x)))
+		case v: Variable => binding.get(v) match {
+			case None => v
+			case Some(t) => extract(t)
+		}
+		case t => t
+	}
+
 	override def toString() = {
-		binding.filter(x => x._1.level == 0).map(x => x._1.name + "=" + x._2).mkString("\n")
+		binding.filter(x => x._1.level < 1).map(x => x._1.name + "=" + extract(x._2)).mkString("\n")
 	}
 }
 
