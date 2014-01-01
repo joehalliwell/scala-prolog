@@ -1,6 +1,3 @@
-import scala.util.parsing.combinator._
-import scala.util.parsing.combinator.syntactical._
-import scala.util.parsing.input._
 import scala.collection.immutable._
 import scala.tools.jline.console._
 import scala.annotation.tailrec
@@ -49,14 +46,14 @@ object Prolog {
 			p.trace = !p.trace
 			console.println("Tracing " + (if (p.trace) "on" else "off") + ".")
 		}
-		case _ 		=> prove(PrologParser.parse(line))
+		case _ 		=> prove(Parser.parse(line))
 	}
 
 
 	def prove(goal: Term) {
-		var solution = p.State(Seq(goal), Seq(), -1)
+		val solution = p.State(Seq(goal), Seq(), -1)
 		
-		@tailrec def next(solution: p.State): Unit = p.solve(solution) match {
+    @tailrec def next(solution: p.State): Unit = p.solve(solution) match {
 			case None => {
 				println("No.")
 			}
@@ -74,7 +71,6 @@ object Prolog {
 		next(solution)
 	}
 }
-
 
 class Prolog {
 	var database = scala.collection.mutable.MutableList[Term]()
@@ -97,7 +93,7 @@ class Prolog {
 			{
 				// Save the line number in case of error
 				lineNumber = index
-				assert(PrologParser.parse(line.trim))
+				assert(Parser.parse(line.trim))
 			}
 		} 
 		catch { 
@@ -283,78 +279,5 @@ case class Success(binding: Map[Variable,Term] = Map[Variable,Term]()) extends E
 
 	override def toString() = {
 		binding.filter(x => x._1.level < 1).map(x => x._1.name + "=" + extract(x._2)).mkString("\n")
-	}
-}
-
-/**
- * AST for Prolog
- */
-sealed trait Term {
-	def renameVars(level: Int) = this
-}
-case class Atom(name: String) extends Term {
-	override def toString = name
-}
-case class Number(value: Double) extends Term {
-	override def toString = value.toString
-}
-case class Str(value: String) extends Term {
-	override def toString = value
-}
-case class Predicate(name: String, arity: Int, args: Seq[Term]) extends Term {
-	override def toString = name match {
-		case Prolog.ListPredicate => "[" + unpackList().mkString(", ") + "]"
-		case default 		=> name + "(" + args.mkString(", ") + ")"
-	}
-	override def renameVars(level: Int) = Predicate(name, arity, args.map(_.renameVars(level)))
-
-	def unpackList() : Seq[Term] = args.tail.head match {
-		case Prolog.EmptyList 	=> Seq(args.head)
-		case tail: Predicate 	=> Seq(args.head) ++ tail.unpackList()
-		case default			=> Seq(args.head, Atom("|"), args.tail.head)
-	}
-}
-case class Variable(name: String, level: Int = 0) extends Term with Ordered[Variable] {
-	override def toString = name + "_" + level
-	override def renameVars(level: Int) = Variable(name, level)
-	def compare(other: Variable): Int = name.compareTo(other.name) match {
-		case 0 => level.compareTo(other.level)
-		case v => v
-	}
-}
-
-
-// Parser
-object PrologParser extends RegexParsers with PackratParsers {
-	def atom: 		Parser[Atom]		= """!|[a-z]\w*""".r ^^ { Atom(_) }
-	def number:		Parser[Number]		= """(\d+(\.\d+)?|\d*\.\d+)""".r ^^ { case v => Number(v.toDouble) }
-	def str:		Parser[Str]			= "\"" ~> """([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*""".r <~"\"" ^^ {
-		// TODO: Other escape codes
-		case v => Str(v.replaceAll("\\\\n","\n"))
-	}
-	def variable:	Parser[Variable]	= """[A-Z]\w*""".r ^^ { case name => Variable(name) }
-	def predicate: 	Parser[Predicate]	= """[a-z]\w*""".r ~ ("(" ~> repsep(term, ",") <~ ")") ^^ {
-		case head ~ args => Predicate(head, args.length, args)
-	}
-	// TODO: Allow infix operators to be user defined
-	lazy val infix:	PackratParser[Predicate] = (term ~ """[-=+*/]|is""".r ~ term) ^^ {
-		case left ~ op ~ right => Predicate(op, 2, List(left, right))
-	}
-	def list:		Parser[Term] 		= "[" ~> listbody <~ "]"
-	def listbody: 	Parser[Term] 		= repsep(term, ",") ~ opt("|" ~> (variable | list)) ^^ {
-		case headList ~ Some(tail)	=> list(headList, tail)
-		case headList ~ None		=> list(headList, Prolog.EmptyList)
-	}
-	lazy val term:		PackratParser[Term]		= predicate | infix | atom | variable | number | str | list
-	lazy val sentence:	PackratParser[Term] 	= term <~ "."
-	def parse(s: String): Term = phrase(sentence)(new PackratReader(new CharSequenceReader(s))) match {
-		case Success(result, _) => result
-		case failure : NoSuccess => scala.sys.error(failure.msg) // throws a runtime exception!	
-	}
-
-	// Helper function to make lists
-	def list(args: Seq[Term], tail: Term): Term = args match {
-		case Nil => tail
-		case default => Predicate(Prolog.ListPredicate, 2, Seq(args.head, list(args.tail, tail)))
 	}
 }
