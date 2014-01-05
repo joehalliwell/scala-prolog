@@ -1,20 +1,16 @@
 # scala-prolog
 
-Learning Scala by writing a toy Prolog interpreter
+Learning Scala by writing a toy Prolog interpreter.
 
 ## Compiling & running
 
-scalac Prolog.scala
-scala Prolog
+This is an SBT project.
 
 ## TODO
 
-- More examples from http://www.cs.toronto.edu/~hojjat/384w09/simple-prolog-examples.html
-- Cuts
-- Arithmetic
-- List notation
-- Infix operators
 - Tests
+- More examples from http://www.cs.toronto.edu/~hojjat/384w09/simple-prolog-examples.html
+- User-defined/infix operators cf http://www.swi-prolog.org/pldoc/man?predicate=op/3
 - Some sort of calling convention between Prolog and Scala
 
 
