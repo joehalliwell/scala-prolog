@@ -16,7 +16,7 @@ child(james2, charles1).
 child(sophia, elizabeth).
 child(george1, sophia).
 
-rule(parent(X, Y), child(Y, X)).
+parent(X, Y) :- child(Y, X).
 
-rule(daughter(X, Y), female(X), child(X, Y)).
-rule(writeln(X), write(X), write("\n")).
+daughter(X, Y) :- female(X), child(X, Y).
+writeln(X) :- write(X), write("\n").
