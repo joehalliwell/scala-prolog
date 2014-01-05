@@ -2,7 +2,9 @@ import scala.collection.immutable._
 import scala.tools.jline.console._
 import scala.annotation.tailrec
 import scala.util.continuations._
-
+import scala.util.parsing.combinator._
+import scala.util.parsing.combinator.syntactical._
+import scala.util.parsing.input._
 
 /*
  * An experiment with writing a Prolog interpreter in Scala
@@ -46,14 +48,14 @@ object Prolog {
 			p.trace = !p.trace
 			console.println("Tracing " + (if (p.trace) "on" else "off") + ".")
 		}
-		case _ 		=> prove(Parser.parse(line))
+		case _ 		=> prove(p.Parser.parse(line))
 	}
 
 
 	def prove(goal: Term) {
 		val solution = p.State(Seq(goal), Seq(), -1)
 		
-    @tailrec def next(solution: p.State): Unit = p.solve(solution) match {
+    	@tailrec def next(solution: p.State): Unit = p.solve(solution) match {
 			case None => {
 				println("No.")
 			}
@@ -73,13 +75,14 @@ object Prolog {
 }
 
 class Prolog {
-	var database = scala.collection.mutable.MutableList[Term]()
-	type Builtin = (Seq[Term], Env) => Env
-
 	var trace = false;
+	var database = scala.collection.mutable.Buffer[Term]()
+	var operators = scala.collection.mutable.Buffer[String](":-", ",", "=", "is", "+", "-", "*", "/")
+
+	//type Builtin = (Seq[Term], Env) => Env	
 
 	def assert(fact: Term) = { 
-		database = database ++ Seq(fact)
+		database += fact
 	}
 
 	def consult(filename: String) = {
@@ -98,7 +101,7 @@ class Prolog {
 		} 
 		catch { 
 			case e: Exception => {
-				println("Syntax error in line " + lineNumber + ": " + e.getMessage)
+				println("Syntax error in line " + (lineNumber + 1) + ": " + e.getMessage)
 			}
 		}
 	}
@@ -190,6 +193,11 @@ class Prolog {
 					case env: Success => state.push(env, -1)
 				}
 			}
+			case Predicate(",", 2, args) => {
+				return Some(State(args ++ state.goals.tail, new Stackframe(state.goals.head, state.env, state.index) +: state.stack, -1))
+			}
+			// case Predicate(";", 2, args)
+
 			case Predicate("is", 2, args) => {
 				var rhs = evaluate(args.tail.head, state.env)
 				state.env.unify((args.head, Number(rhs))) match {
@@ -206,7 +214,7 @@ class Prolog {
 		for (index <- state.index until database.length) {
 			database(index) match {
 				// Rules
-				case Predicate("rule", _, args) => { 
+				case Predicate(":-", 2, args) => { 
 					state.env.unify((state.goals.head, args.head.renameVars(state.stack.length + 1))) match {
 						case env: Success => {
 							//println("Matched rule...")
@@ -233,11 +241,72 @@ class Prolog {
 		return None
 	}
 
+	/*******************************************************************
+	 * PARSER
+	 *******************************************************************/
+	object Parser extends RegexParsers with PackratParsers {
+		def atom:     Parser[Atom]    = """!|[a-z]\w*""".r ^^ { Atom(_) }
+		def number:   Parser[Number]  = """(\d+(\.\d+)?|\d*\.\d+)""".r ^^ { case v => Number(v.toDouble) }
+		def str:      Parser[Str]     = "\"" ~> """([^"\p{Cntrl}\\]|\\[\\/bfnrt]|\\u[a-fA-F0-9]{4})*""".r <~"\"" ^^ {
+			// TODO: Other escape codes
+			case v => Str(v.replaceAll("\\\\n","\n"))
+		}
+		def variable: 	Parser[Variable]					= """[A-Z]\w*""".r ^^ { case name => Variable(name) }
+		def predicate:  PackratParser[Predicate]  = """[a-z]\w*""".r ~ ("(" ~> rep1sep(exp, ",") <~ ")") ^^ {
+			case head ~ args => Predicate(head, args.length, args)
+		}
+		// TODO: Allow infix operators to be user defined
+		lazy val infix: PackratParser[Predicate] = (term ~ infixOp ~ term) ^^ {
+			case left ~ op ~ right => Predicate(op, 2, List(left, right))
+		}
+		def list:   		Parser[Term]    		= "[" ~> listbody <~ "]"
+		def listbody:   Parser[Term]    		= repsep(exp, ",") ~ opt("|" ~> (variable | list)) ^^ {
+			case headList ~ Some(tail)  => list(headList, tail)
+			case headList ~ None    		=> list(headList, Prolog.EmptyList)
+		}
+		lazy val exp:			PackratParser[Term] = predicate | atom | variable | number | str | list
+		lazy val term:    	PackratParser[Term] = infix | exp
+		lazy val sentence:  PackratParser[Term]	= term <~ "."
+		
+		def infixOp:		Parser[String] = new Parser[String] {
+	    def apply(in: Input) = {
+	    	val source = in.source
+	      val offset = in.offset
+	      val start = handleWhiteSpace(source, offset)
+	      val token = source.subSequence(start, source.length).toString()
+	     	//println(operators)
+	     	//println(token)
+	    	operators.find(op => token.startsWith(op)) match {
+	    		case Some(op) => Success(op, in.drop(start - offset + op.length))
+	    		case None			=> Failure("Couldn't locate matching op in " + token, in.drop(start - offset)) 
+	    	}
+	    }
+	  }
+
+		def parse(s: String): Term = phrase(sentence)(reader(s)) match {
+			case Success(result, _) => result
+			case failure : NoSuccess => scala.sys.error(failure.msg) // throws a runtime exception!
+		}
+
+		def reader(s: String) = new PackratReader(new CharSequenceReader(s))
+
+		// Helper function to make lists
+		def list(args: Seq[Term], tail: Term): Term = args match {
+			case Nil 			=> tail
+			case default 	=> Predicate(Prolog.ListPredicate, 2, Seq(args.head, list(args.tail, tail)))
+		}
+	}
+
 }
+
+
+/*******************************************************************
+ *
+ *******************************************************************/
 
 /*
  * Bindings
- * TODO: Occurs check
+ * TODO: Occurs check? Merge with State?
  */
 sealed trait Env {def unify(terms: (Term, Term)) = this }
 case class Fail() extends Env
@@ -280,4 +349,5 @@ case class Success(binding: Map[Variable,Term] = Map[Variable,Term]()) extends E
 	override def toString() = {
 		binding.filter(x => x._1.level < 1).map(x => x._1.name + "=" + extract(x._2)).mkString("\n")
 	}
+
 }

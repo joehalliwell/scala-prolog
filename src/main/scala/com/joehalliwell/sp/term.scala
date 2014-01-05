@@ -18,14 +18,14 @@ case class Str(value: String) extends Term {
 case class Predicate(name: String, arity: Int, args: Seq[Term]) extends Term {
   override def toString = name match {
     case Prolog.ListPredicate => "[" + unpackList().mkString(", ") + "]"
-    case default 		=> name + "(" + args.mkString(", ") + ")"
+    case default 		          => name + "(" + args.mkString(", ") + ")"
   }
   override def renameVars(level: Int) = Predicate(name, arity, args.map(_.renameVars(level)))
 
   def unpackList() : Seq[Term] = args.tail.head match {
-    case Prolog.EmptyList 	=> Seq(args.head)
-    case tail: Predicate 	=> Seq(args.head) ++ tail.unpackList()
-    case default			=> Seq(args.head, Atom("|"), args.tail.head)
+    case Prolog.EmptyList => Seq(args.head)
+    case tail: Predicate  => Seq(args.head) ++ tail.unpackList()
+    case default          =>     Seq(args.head, Atom("|"), args.tail.head)
   }
 }
 case class Variable(name: String, level: Int = 0) extends Term with Ordered[Variable] {
