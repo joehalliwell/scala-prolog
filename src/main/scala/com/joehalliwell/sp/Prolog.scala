@@ -77,7 +77,7 @@ object Prolog {
 class Prolog {
 	var trace = false;
 	var database = scala.collection.mutable.Buffer[Term]()
-	var operators = scala.collection.mutable.Buffer[String](":-", ",", "=", "is", "+", "-", "*", "/")
+	var operators = scala.collection.mutable.Buffer[String](":-", ";", ",", "=", "is", "+", "-", "*", "/")
 
 	//type Builtin = (Seq[Term], Env) => Env	
 
@@ -139,7 +139,11 @@ class Prolog {
 	// It is assumed they can only complete in one way.
 	case class State(goals: Seq[Term], stack: Seq[Stackframe], index: Int) {
 		def env 					= if (stack.isEmpty) Success() 	else stack.head.env
- 		def pop():  Option[State] 	= if (stack.isEmpty) None 		else Some(State(stack.head.goal +: goals, stack.tail, stack.head.index + 1))
+ 		def pop():  Option[State] 	= if (stack.isEmpty) None 		else stack.head.goal match {
+ 			// HACK: Handle disjunctions
+ 			case Predicate(";", 2, args) => Some(State(args.tail.head +: goals.tail, stack.tail, -1))
+ 			case default => Some(State(stack.head.goal +: goals, stack.tail, stack.head.index + 1))
+ 		}
 		def push(): Option[State] 	= push(env, 0)
 		def push(env: Env, index: Int): Option[State] = env match {
 			case env: Success => Some(State(goals.tail, Stackframe(goals.head, env, index) +: stack, -1))
@@ -194,9 +198,16 @@ class Prolog {
 				}
 			}
 			case Predicate(",", 2, args) => {
-				return Some(State(args ++ state.goals.tail, new Stackframe(state.goals.head, state.env, state.index) +: state.stack, -1))
+				return Some(State(
+					args ++ state.goals.tail,
+					new Stackframe(state.goals.head, state.env, state.index) +: state.stack,
+					-1))
 			}
-			// case Predicate(";", 2, args)
+			case Predicate(";", 2, args) => {
+				return Some(State(Seq(args.head) ++ state.goals.tail,
+					new Stackframe(state.goals.head, state.env, state.index) +: state.stack,
+					-1))
+			}
 
 			case Predicate("is", 2, args) => {
 				var rhs = evaluate(args.tail.head, state.env)
@@ -238,7 +249,7 @@ class Prolog {
 				}
 			}
 		}
-		return None
+		return state.pop()
 	}
 
 	/*******************************************************************

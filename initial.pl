@@ -15,3 +15,6 @@ fib(N, R) :- fib(N, R1, R).
 
 rev([], X, X).
 rev([H|T], T2, R) :- rev(T, [H|T2], R).
+
+baz.
+foo :- bar; baz.
