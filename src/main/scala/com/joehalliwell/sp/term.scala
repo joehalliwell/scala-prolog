@@ -6,15 +6,19 @@ import scala.collection.immutable._
 sealed trait Term {
   def renameVars(level: Int) = this
 }
+
 case class Atom(name: String) extends Term {
   override def toString = name
 }
+
 case class Number(value: Double) extends Term {
   override def toString = value.toString
 }
+
 case class Str(value: String) extends Term {
   override def toString = value
 }
+
 case class Predicate(name: String, arity: Int, args: Seq[Term]) extends Term {
   override def toString = name match {
     case Prolog.ListPredicate => "[" + unpackList().mkString(", ") + "]"
@@ -28,6 +32,7 @@ case class Predicate(name: String, arity: Int, args: Seq[Term]) extends Term {
     case default          =>     Seq(args.head, Atom("|"), args.tail.head)
   }
 }
+
 case class Variable(name: String, level: Int = 0) extends Term with Ordered[Variable] {
   override def toString = name + "_" + level
   override def renameVars(level: Int) = Variable(name, level)
