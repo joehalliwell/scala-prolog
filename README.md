@@ -13,5 +13,7 @@ This is an SBT project.
 - User-defined/infix operators cf http://www.swi-prolog.org/pldoc/man?predicate=op/3
 - Some sort of calling convention between Prolog and Scala
 
+- Fibonacci example: requires correct goal sequencing -- or a cut!
+
 
 

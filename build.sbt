@@ -1,11 +1,8 @@
 name := "scala-prolog"
 
-libraryDependencies += "org.scala-lang.virtualized" % "jline" % "latest.integration"
+resolvers += "scalaz-bintray" at "http://dl.bintray.com/scalaz/releases"
 
-libraryDependencies += "org.specs2" %% "specs2" % "latest.integration" % "test"
+libraryDependencies += "org.scala-lang.virtualized" % "jline" % "latest.release"
 
-autoCompilerPlugins := true
- 
-addCompilerPlugin("org.scala-lang.plugins" % "continuations" % "2.9.1")
- 
-scalacOptions += "-P:continuations:enable"
+libraryDependencies += "org.specs2" %% "specs2-core" % "3.8.4" % "test"
+libraryDependencies += "org.specs2" %% "specs2-matcher-extra" % "3.8.4" % "test"

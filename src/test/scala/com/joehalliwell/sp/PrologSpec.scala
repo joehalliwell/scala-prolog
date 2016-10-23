@@ -1,15 +1,22 @@
-import org.specs2.mutable._
+import com.joehalliwell.sp.{Atom, Prolog}
 import org.specs2.matcher.ParserMatchers
-import scala.util.parsing.combinator._
-import scala.util.parsing.combinator.syntactical._
-import scala.util.parsing.input._
- 
+import org.specs2.mutable.Specification
+
+
 class PrologParserTest extends Specification with ParserMatchers {
-  val parsers = new Prolog().Parser
+  val parsers = new Prolog().parser
 
   "term" should {
     "succeed to recognize 'hello'" in {
-      parsers.term must succeedOn(parsers.reader("hello")).withResult(Atom("hello"))
+      parsers.exp must succeedOn(parsers.reader("hello")).withResult(Atom("hello"))
+    }
+  }
+
+  "exp" should {
+    "handle commas correctly" in {
+      val ast = parsers.parse("X is 1 + 2; Y is 3 + 4.")
+      println(ast)
+      1 must_==(1)
     }
   }
 }
